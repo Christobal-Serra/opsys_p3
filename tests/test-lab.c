@@ -153,6 +153,26 @@ void test_btok_conversion(void) {
     TEST_ASSERT_EQUAL_UINT64(0, btok(0));
 }
 
+void test_buddy_calc_known_pair(void) {
+  fprintf(stderr, "->Testing buddy_calc with known address\n");
+
+  struct buddy_pool pool;
+  size_t kval = 4; // 2^4 = 16 byte block size
+  size_t size = UINT64_C(1) << kval;
+
+  buddy_init(&pool, size);
+
+  struct avail *block = (struct avail *)pool.base;
+  block->kval = kval;
+
+  struct avail *expected_buddy = (struct avail *)((uintptr_t)block ^ (UINT64_C(1) << kval));
+  struct avail *actual_buddy = buddy_calc(&pool, block);
+
+  TEST_ASSERT_EQUAL_PTR(expected_buddy, actual_buddy);
+
+  buddy_destroy(&pool);
+}
+
 
 int main(void) {
   time_t t;
@@ -166,5 +186,6 @@ int main(void) {
   RUN_TEST(test_buddy_malloc_one_byte);
   RUN_TEST(test_buddy_malloc_one_large);
   RUN_TEST(test_btok_conversion);
+  RUN_TEST(test_buddy_calc_known_pair);
   return UNITY_END();
 }

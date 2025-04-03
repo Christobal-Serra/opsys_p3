@@ -48,9 +48,14 @@ size_t btok(size_t bytes) {
     return k;
 }
 
-struct avail *buddy_calc(struct buddy_pool *pool, struct avail *buddy)
-{
-
+struct avail *buddy_calc(struct buddy_pool *pool, struct avail *buddy) {
+    uintptr_t addr = (uintptr_t)buddy; // address of the block we want to find the buddy for.
+    /* Calculate the buddy address by XORing the address with the size of the block, which will 
+    flip the bit at the position of buddy->kval. Left-shifting 1 by buddy->kval bits (using UINT64_C 
+    to ensure proper 64-bit width) gives us 2^kval — the block size in bytes. XORing the block's 
+    address with that value flips the k-th bit, which is how the buddy system finds the address of 
+    the paired (buddy) block. Cast it to the avail struct and return.*/
+    return (struct avail *)(addr ^ (UINT64_C(1) << buddy->kval));
 }
 
 void *buddy_malloc(struct buddy_pool *pool, size_t size)
