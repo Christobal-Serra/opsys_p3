@@ -1,3 +1,12 @@
+/**
+ * @file lab.c
+ * @brief Implementation of a Buddy System Memory Allocator.
+ *
+ * Memory allocator based on the buddy system. The allocator ensures efficient memory 
+ * usage by dividing memory blocks into 'buddy' blocks.
+ */
+
+
 #include <stdio.h>
 #include <stdbool.h>
 #include <sys/mman.h>
@@ -29,9 +38,14 @@
  * @param bytes the number of bytes
  * @return size_t the K value that will fit bytes
  */
-size_t btok(size_t bytes)
-{
-    //DO NOT use math.pow
+size_t btok(size_t bytes) {
+    size_t k = 0;
+    size_t block_size = UINT64_C(1); // C99 macro ensures it's treated as a 64-bit constant
+    while (block_size < bytes) {
+        block_size <<= 1; // equivalent to multiplying by 2
+        k++;
+    }
+    return k;
 }
 
 struct avail *buddy_calc(struct buddy_pool *pool, struct avail *buddy)

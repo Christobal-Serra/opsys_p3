@@ -133,6 +133,26 @@ void test_buddy_init(void)
     }
 }
 
+void test_btok_conversion(void) {
+    fprintf(stderr, "->Testing btok conversion\n");
+
+    // Basic powers of 2
+    TEST_ASSERT_EQUAL_UINT64(0, btok(1));
+    TEST_ASSERT_EQUAL_UINT64(1, btok(2));
+    TEST_ASSERT_EQUAL_UINT64(2, btok(4));
+    TEST_ASSERT_EQUAL_UINT64(3, btok(8));
+    TEST_ASSERT_EQUAL_UINT64(10, btok(1024));
+
+    // Not exact powers of 2 (should round up)
+    TEST_ASSERT_EQUAL_UINT64(3, btok(5));     // 2^3 = 8
+    TEST_ASSERT_EQUAL_UINT64(5, btok(33));    // 2^5 = 32 → too small, 2^6 = 64
+    TEST_ASSERT_EQUAL_UINT64(6, btok(34));    // 2^6 = 64
+    TEST_ASSERT_EQUAL_UINT64(20, btok(1 << 20)); // 1 MiB
+
+    // Edge case: 0 bytes should return 0 (even though it's invalid for malloc)
+    TEST_ASSERT_EQUAL_UINT64(0, btok(0));
+}
+
 
 int main(void) {
   time_t t;
@@ -145,5 +165,6 @@ int main(void) {
   RUN_TEST(test_buddy_init);
   RUN_TEST(test_buddy_malloc_one_byte);
   RUN_TEST(test_buddy_malloc_one_large);
-return UNITY_END();
+  RUN_TEST(test_btok_conversion);
+  return UNITY_END();
 }

@@ -1,3 +1,12 @@
+/**
+ * @file lab.h
+ * @brief Header file for the Buddy Memory Allocation system.
+ *
+ * Memory allocator based on the buddy system. The allocator ensures efficient memory usage 
+ * by dividing memory blocks into 'buddy' blocks.
+ * 
+ */
+
 #ifndef LAB_H
 #define LAB_H
 
