@@ -48,37 +48,170 @@ size_t btok(size_t bytes) {
     return k;
 }
 
+/**
+ * @brief Removes a block from its free list.
+ * 
+ * @param block Pointer to the block to be removed.
+ */
+ static void remove_from_freelist(struct avail *block) {
+    block->next->prev = block->prev;
+    block->prev->next = block->next;
+}
+
+/**
+ * @brief Inserts a block into the free list.
+ * 
+ * @param pool Pointer to the buddy pool.
+ * @param block Pointer to the block to be inserted.
+ * @param kval The size class of the block.
+ */
+void insert_into_freelist(struct buddy_pool *pool, struct avail *block, size_t kval) {
+    block->next = pool->avail[kval].next;
+    block->prev = &pool->avail[kval];
+    pool->avail[kval].next->prev = block;
+    pool->avail[kval].next = block;
+}
+
+/**
+ * @brief Checks if a block is within the bounds of the buddy pool.
+ * 
+ * @param pool Pointer to the buddy pool.
+ * @param block Pointer to the block to check.
+ * @return true if the block is within the pool, false otherwise.
+ */
+bool block_in_bounds(struct buddy_pool *pool, struct avail *block) {
+    uintptr_t addr = (uintptr_t)block;
+    uintptr_t base = (uintptr_t)pool->base;
+    return addr >= base && addr < base + pool->numbytes;
+}
+
+/**
+ * @brief Checks if a block is within the bounds of the buddy pool.
+ * 
+ * @param pool Pointer to the buddy pool.
+ * @param buddy Pointer to the block to check.
+ * @return true if the block is within the pool, false otherwise.
+ */
+bool can_merge(struct buddy_pool *pool, struct avail *buddy, size_t kval) {
+    return block_in_bounds(pool, buddy) && 
+            (buddy->tag == BLOCK_AVAIL) && 
+            (buddy->kval == kval);
+}
+
+/**
+ * @brief Checks if a block is within the bounds of the buddy pool.
+ * 
+ * @param pool Pointer to the buddy pool.
+ * @param block Pointer to the block to check.
+ * @return true if the block is within the pool, false otherwise.
+ */
+struct avail *get_block_metadata(void *ptr) {
+    return ((struct avail *)ptr)-1;
+}
+
+/**
+ * @brief Finds the next kval index with a non-empty free list.
+ *
+ * @param pool The memory pool.
+ * @param start_k The starting kval to search from.
+ * @return The kval index with a non-empty list, or pool->kval_m + 1 if none found.
+ */
+ static size_t find_next_nonempty_kval(struct buddy_pool *pool, size_t start_k) {
+    size_t k = start_k;
+    while ( (k <= pool->kval_m) && (pool->avail[k].next == &pool->avail[k]) ) {
+        k++;
+    }
+    return k;
+}
+
 struct avail *buddy_calc(struct buddy_pool *pool, struct avail *buddy) {
-    uintptr_t addr = (uintptr_t)buddy; // address of the block we want to find the buddy for.
-    /* Calculate the buddy address by XORing the address with the size of the block, which will 
-    flip the bit at the position of buddy->kval. Left-shifting 1 by buddy->kval bits (using UINT64_C 
-    to ensure proper 64-bit width) gives us 2^kval — the block size in bytes. XORing the block's 
-    address with that value flips the k-th bit, which is how the buddy system finds the address of 
-    the paired (buddy) block. Cast it to the avail struct and return.*/
-    return (struct avail *)(addr ^ (UINT64_C(1) << buddy->kval));
+    /* Convert the block's address to an offset relative to the base of the pool to ensure that 
+    our we are consistent regardless of where the memory was mapped in the virtual address space. */
+    uintptr_t offset = (uintptr_t)buddy - (uintptr_t)pool->base;
+    /* Calculate the buddy offset by XORing the block's offset with the size of the block. This flips 
+    the bit corresponding to buddy->kval, giving us the relative offset of the buddy block. */
+    uintptr_t buddy_offset = offset ^ (UINT64_C(1) << buddy->kval);
+    /* Add the buddy offset back to the pool's base address to get the actual address of the buddy block. 
+    Cast it to the avail struct and return. */
+    return (struct avail *)((uintptr_t)pool->base + buddy_offset);
 }
 
-void *buddy_malloc(struct buddy_pool *pool, size_t size)
-{
-
-    //get the kval for the requested size with enough room for the tag and kval fields
-
-    //R1 Find a block
-
-    //There was not enough memory to satisfy the request thus we need to set error and return NULL
-
-    //R2 Remove from list;
-
-    //R3 Split required?
-
-    //R4 Split the block
-
+void *buddy_malloc(struct buddy_pool *pool, size_t size) {
+    if (!pool || size == 0) { // Check for NULL pool or size
+        return NULL;
+    }
+    /* Calculate the smallest power-of-two block size needed to fulfill the request. Requested 
+    size + the space for the metadata (struct avail). Use btok to return the smallest k such that 
+    2^k is large enough to fit everything. */
+    size_t kval = btok(size + sizeof(struct avail));
+    // Enforce minimum block size
+    if (kval < SMALLEST_K) {
+        kval = SMALLEST_K;
+    }
+    /* Search for the smallest available block that can satisfy the request. */
+    size_t current_k = find_next_nonempty_kval(pool, kval);
+    // No memory big enough found — set error and return NULL.
+    if (current_k > pool->kval_m) {
+        errno = ENOMEM; // EMONEM is no memory available macro
+        return NULL;
+    }
+    // Remove the memory from free list, so that we can use it.
+    struct avail *block = pool->avail[current_k].next;
+    remove_from_freelist(block);
+    // Split required?
+    while (current_k > kval) {
+        current_k--; // Decrease the size of the block to split
+        block->kval = current_k; // Must set kval first so buddy_calc sees the right value
+        struct avail *buddy = buddy_calc(pool, block); // Now buddy_calc uses correct kval
+        // Always keep the lower address as the one to continue splitting
+        if (buddy < block) {
+            struct avail *temp = block;
+            block = buddy;
+            buddy = temp;
+        }
+        if (!block_in_bounds(pool, buddy)) {
+            break;
+        }
+        // Split the block: insert buddy into the freelist
+        buddy->kval = current_k;
+        buddy->tag = BLOCK_AVAIL;
+        insert_into_freelist(pool, buddy, current_k);
+    }
+    // Mark block as used and return pointer to usable memory
+    block->tag = BLOCK_RESERVED;
+    return (void *)(block+1); // skip over metadata
 }
 
-void buddy_free(struct buddy_pool *pool, void *ptr)
-{
+void buddy_free(struct buddy_pool *pool, void *ptr) {
+    if (!pool || !ptr) { // Validity check
+        return;
+    }
+    // Convert user pointer back to block metadata.
+    struct avail *block = get_block_metadata(ptr);
+    // Mark the block as available.
+    block->tag = BLOCK_AVAIL;
 
+    // Attempt to merge with buddies of the same size.
+    while (block->kval < pool->kval_m) {
+        // Get buddy
+        struct avail *buddy = buddy_calc(pool, block);
+        // Check if buddy is within bounds.
+        if (!can_merge(pool, buddy, block->kval)) {
+            break;
+        }
+        // Remove buddy from the free list.
+        remove_from_freelist(buddy);
+        // Determine which block has the lower address
+        if (buddy < block) {
+            block = buddy;
+        }
+        // Update the block size
+        block->kval++;
+    }
+    // Insert the merged block into the correct free list.
+    insert_into_freelist(pool, block, block->kval);
 }
+
 
 /**
  * @brief This is a simple version of realloc.

@@ -9,6 +9,8 @@
 #include "harness/unity.h"
 #include "../src/lab.h"
 
+struct avail *get_block_metadata(void *ptr);
+
 
 void setUp(void) {
   // set stuff up here
@@ -134,23 +136,23 @@ void test_buddy_init(void)
 }
 
 void test_btok_conversion(void) {
-    fprintf(stderr, "->Testing btok conversion\n");
+  fprintf(stderr, "->Testing btok conversion\n");
 
-    // Basic powers of 2
-    TEST_ASSERT_EQUAL_UINT64(0, btok(1));
-    TEST_ASSERT_EQUAL_UINT64(1, btok(2));
-    TEST_ASSERT_EQUAL_UINT64(2, btok(4));
-    TEST_ASSERT_EQUAL_UINT64(3, btok(8));
-    TEST_ASSERT_EQUAL_UINT64(10, btok(1024));
+  // Basic powers of 2
+  TEST_ASSERT_EQUAL_UINT64(0, btok(1));
+  TEST_ASSERT_EQUAL_UINT64(1, btok(2));
+  TEST_ASSERT_EQUAL_UINT64(2, btok(4));
+  TEST_ASSERT_EQUAL_UINT64(3, btok(8));
+  TEST_ASSERT_EQUAL_UINT64(10, btok(1024));
 
-    // Not exact powers of 2 (should round up)
-    TEST_ASSERT_EQUAL_UINT64(3, btok(5));     // 2^3 = 8
-    TEST_ASSERT_EQUAL_UINT64(5, btok(33));    // 2^5 = 32 → too small, 2^6 = 64
-    TEST_ASSERT_EQUAL_UINT64(6, btok(34));    // 2^6 = 64
-    TEST_ASSERT_EQUAL_UINT64(20, btok(1 << 20)); // 1 MiB
+  // Not exact powers of 2 (should round up)
+  TEST_ASSERT_EQUAL_UINT64(3, btok(5));      // 2^3 = 8
+  TEST_ASSERT_EQUAL_UINT64(6, btok(33));     // 2^6 = 64
+  TEST_ASSERT_EQUAL_UINT64(6, btok(34));     // 2^6 = 64
+  TEST_ASSERT_EQUAL_UINT64(20, btok(1 << 20)); // 1 MiB
 
-    // Edge case: 0 bytes should return 0 (even though it's invalid for malloc)
-    TEST_ASSERT_EQUAL_UINT64(0, btok(0));
+  // Edge case: 0 bytes should return 0 (even though it's invalid for malloc)
+  TEST_ASSERT_EQUAL_UINT64(0, btok(0));
 }
 
 void test_buddy_calc_known_pair(void) {
@@ -173,6 +175,72 @@ void test_buddy_calc_known_pair(void) {
   buddy_destroy(&pool);
 }
 
+void test_buddy_alloc_free_merge(void) {
+  struct buddy_pool pool;
+  buddy_init(&pool, UINT64_C(1) << 10); // 1 KiB pool
+  
+  void *ptr = buddy_malloc(&pool, 100); // Should allocate from smaller block
+  TEST_ASSERT_NOT_NULL(ptr);
+  
+  buddy_free(&pool, ptr);
+  check_buddy_pool_full(&pool); // Pool should be whole again
+  
+  buddy_destroy(&pool);
+}
+
+void test_partial_merge_behavior(void) {
+  fprintf(stderr, "->Testing partial free and merge behavior\n");
+  struct buddy_pool pool;
+  size_t size = UINT64_C(1) << 13; // 8 KiB
+  buddy_init(&pool, size);
+
+  // Allocate 4 blocks of 32 bytes (will be rounded up internally)
+  void *a = buddy_malloc(&pool, 32);
+  void *b = buddy_malloc(&pool, 32);
+  void *c = buddy_malloc(&pool, 32);
+  void *d = buddy_malloc(&pool, 32);
+  fprintf(stderr, "a: %p, b: %p, c: %p, d: %p\n", a, b, c, d);
+
+
+  // Assert all were allocated
+  TEST_ASSERT_NOT_NULL(a);
+  TEST_ASSERT_NOT_NULL(b);
+  TEST_ASSERT_NOT_NULL(c);
+  TEST_ASSERT_NOT_NULL(d);
+
+  // Free b and a — they should merge
+  buddy_free(&pool, b);
+  buddy_free(&pool, a);
+
+  // Get metadata for c and d and make sure they’re still in use
+  struct avail *meta_c = get_block_metadata(c);
+  struct avail *meta_d = get_block_metadata(d);
+
+  TEST_ASSERT_NOT_NULL(meta_c);
+  TEST_ASSERT_NOT_NULL(meta_d);
+  TEST_ASSERT_EQUAL_UINT8(BLOCK_RESERVED, meta_c->tag);
+  TEST_ASSERT_EQUAL_UINT8(BLOCK_RESERVED, meta_d->tag);
+
+  // Search for the merged block in the freelist
+  int found_merged = 0;
+  for (size_t k = 0; k <= pool.kval_m; ++k) {
+    struct avail *head = &pool.avail[k];
+    for (struct avail *cur = head->next; cur != head; cur = cur->next) {
+      if (cur->tag == BLOCK_AVAIL && cur->kval == 7) {
+        found_merged = 1;
+        break;
+      }
+    }
+    if (found_merged) break;
+  }
+
+  TEST_ASSERT_TRUE_MESSAGE(found_merged, "Expected merged a+b block not found in freelist");
+
+  // Cleanup
+  buddy_free(&pool, c);
+  buddy_free(&pool, d);
+  buddy_destroy(&pool);
+}
 
 int main(void) {
   time_t t;
@@ -187,5 +255,7 @@ int main(void) {
   RUN_TEST(test_buddy_malloc_one_large);
   RUN_TEST(test_btok_conversion);
   RUN_TEST(test_buddy_calc_known_pair);
+  RUN_TEST(test_buddy_alloc_free_merge);
+  RUN_TEST(test_partial_merge_behavior);
   return UNITY_END();
 }
