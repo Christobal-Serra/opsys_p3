@@ -221,11 +221,12 @@ void buddy_free(struct buddy_pool *pool, void *ptr) {
  * @param size the new size requested
  * @return void* pointer to the new user memory
  */
-void *buddy_realloc(struct buddy_pool *pool, void *ptr, size_t size)
+/* void *buddy_realloc(struct buddy_pool *pool, void *ptr, size_t size)
 {
+    // TODO - might do this later
     //Required for Grad Students
     //Optional for Undergrad Students
-}
+} */
 
 void buddy_init(struct buddy_pool *pool, size_t size)
 {
@@ -293,7 +294,7 @@ void buddy_destroy(struct buddy_pool *pool)
  * This function can be useful to visualize the bits in a block. This can
  * help when figuring out the buddy_calc function!
  */
-static void printb(unsigned long int b)
+/* static void printb(unsigned long int b)
 {
      size_t bits = sizeof(b) * 8;
      unsigned long int curr = UINT64_C(1) << (bits - 1);
@@ -309,5 +310,5 @@ static void printb(unsigned long int b)
           }
           curr >>= 1L;
      }
-}
+} */
 
